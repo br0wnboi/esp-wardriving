@@ -1,0 +1,119 @@
+#define BLYNK_TEMPLATE_ID "TMPL3kpuC7l2s"
+#define BLYNK_TEMPLATE_NAME "data"
+#define BLYNK_AUTH "3zp4KfyaplpP98xU7YjFUiBgZWK7DTSm"
+#define BLYNK_PRINT Serial
+#include <TinyGPS++.h>
+#include <SoftwareSerial.h>
+#include <ESP8266WiFi.h>
+#include <BlynkSimpleEsp8266.h>
+
+#define RX_PIN 5 // D2 on NodeMCU
+#define TX_PIN 4 // D1 on NodeMCU
+#define WIFI_SSID "node"  // Replace with your Wi-Fi SSID
+#define WIFI_PASSWORD "nodenode"  // Replace with your Wi-Fi password
+
+SoftwareSerial gpsSerial(RX_PIN, TX_PIN);
+TinyGPSPlus gps;
+
+unsigned long lastWifiScanTime = 0;
+const unsigned long wifiScanInterval = 5000; // 5 seconds
+
+bool readGPS = false; // Flag to control when to read GPS data
+
+void readGPSData() {
+  while (gpsSerial.available() > 0) {
+    if (gps.encode(gpsSerial.read())) {
+      if (gps.location.isValid()) {
+        Serial.print("Latitude: ");
+        Serial.println(gps.location.lat(), 6);
+        Serial.print("Longitude: ");
+        Serial.println(gps.location.lng(), 6);
+
+        // Send GPS data to Blynk
+        Blynk.virtualWrite(V1, gps.location.lat());
+        Blynk.virtualWrite(V2, gps.location.lng());
+
+        // Set the flag to false after reading one GPS location
+        readGPS = false;
+      } else {
+        Serial.println("Invalid GPS data");
+      }
+    }
+  }
+}
+
+void scanAndPrintNetworks() {
+  int networksFound = WiFi.scanNetworks();
+
+  if (networksFound == -1) {
+    Serial.println("Error scanning networks");
+  } else if (networksFound == 0) {
+    Serial.println("No networks found");
+  } else {
+    int maxNetworksToShow = min(5, networksFound);
+
+    Serial.print(min(networksFound, 5));
+    Serial.println(" networks found:");
+
+    // Clear the V3 widget on Blynk
+    Blynk.virtualWrite(V3, "");
+
+    for (int i = 0; i < maxNetworksToShow; ++i) {
+      // Print network details to Serial
+      Serial.print("Network ");
+      Serial.print(i + 1);
+      Serial.print(": ");
+      Serial.print(WiFi.SSID(i));
+      Serial.print(" (Signal: ");
+      Serial.print(WiFi.RSSI(i));
+      Serial.println(" dBm)");
+
+      // Send network details to Blynk
+      String networkDetails = WiFi.SSID(i) + " (Signal: " + String(WiFi.RSSI(i)) + " dBm)\n";
+      Blynk.virtualWrite(V3, networkDetails);
+    }
+  }
+}
+
+
+void setup() {
+  Serial.begin(9600);
+  gpsSerial.begin(9600);
+
+  // Connect to Wi-Fi
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(1000);
+    Serial.println("Connecting to WiFi...");
+  }
+
+  // Connect to Blynk
+  Blynk.begin(BLYNK_AUTH, WIFI_SSID, WIFI_PASSWORD);
+
+  Serial.println("Connected to Wi-Fi");
+  Serial.println("Scanning for networks...");
+}
+
+void loop() {
+  // Check if it's time to perform Wi-Fi scan
+  unsigned long currentMillis = millis();
+  if (currentMillis - lastWifiScanTime >= wifiScanInterval) {
+    // Update the last scan time
+    lastWifiScanTime = currentMillis;
+
+    // Call the function to scan and print networks
+    scanAndPrintNetworks();
+
+    // Set the flag to read GPS data after the Wi-Fi scan
+    readGPS = true;
+  }
+
+  // Check if the flag is set to read GPS data
+  if (readGPS) {
+    // Call the function to read and process GPS data
+    readGPSData();
+  }
+
+  // Process Blynk
+  Blynk.run();
+}
